@@ -1,0 +1,16 @@
+services:
+  tvdb-provider:
+    # :latest follows the newest tagged release.
+    # Pin to an exact version in production, e.g. ghcr.io/o51r15/tvdb-provider:1.0.0
+    # Note the image tags carry no "v" prefix even though the git tags do.
+    # :dev is the development stream and will break.
+    image: ghcr.io/o51r15/tvdb-provider:latest
+    container_name: tvdb-provider
+    restart: unless-stopped
+    ports:
+      # 8081, so this runs alongside the ThePornDB provider on 8080.
+      - "8081:8081"
+    environment:
+      - TZ=America/New_York
+    env_file:
+      - .env

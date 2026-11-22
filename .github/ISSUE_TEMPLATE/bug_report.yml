@@ -1,0 +1,84 @@
+name: Bug report
+description: Something matched wrongly, or not at all
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: hit `/health` and the relevant `/<order>/selftest?q=<show>`
+        on your deployment. The selftest walks login, season types, search,
+        series and episodes, and names the step that failed — that output
+        usually identifies the problem on its own.
+
+        **Do not paste your `TVDB_API_KEY` or `TVDB_PIN` anywhere in this issue.**
+
+  - type: input
+    id: version
+    attributes:
+      label: Image tag or commit
+      placeholder: "ghcr.io/o51r15/tvdb-provider:dev, or a commit sha"
+    validations:
+      required: true
+
+  - type: input
+    id: pms
+    attributes:
+      label: Plex Media Server version
+      placeholder: "1.43.5.11079"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: order
+    attributes:
+      label: Which provider / order
+      options:
+        - /aired (official)
+        - /dvd
+        - /absolute
+        - /alternate
+        - /regional
+        - /altdvd
+        - /alttwo
+        - /default
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+      placeholder: |
+        Show: Firefly (tvdb 78874)
+        Expected S01E01 to be Serenity under DVD order; got The Train Job.
+    validations:
+      required: true
+
+  - type: textarea
+    id: selftest
+    attributes:
+      label: /selftest output
+      render: json
+
+  - type: textarea
+    id: health
+    attributes:
+      label: /health output
+      render: json
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container logs around the failure
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant TVDB_* settings
+      description: Redact the key and PIN.
+      render: shell
+      placeholder: |
+        TVDB_ORDER_PROVIDERS=official,dvd,absolute
+        TVDB_ORDER_OVERRIDES=78874:dvd
+        TVDB_LANGUAGE=eng

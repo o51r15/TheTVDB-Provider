@@ -1,0 +1,34 @@
+# Credentials. The repo is public; the real .env lives in ../deploy/.
+.env
+.env.local
+*.ppk
+*.pem
+
+# Host-specific deployment overrides
+docker-compose.override.yml
+docker-compose.override.yml.bak*
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Planning and scratch notes, kept out of the published repo
+CLAUDE.md
+DEVLOG.md
+ROADMAP.md
+notes/
+scratch/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
