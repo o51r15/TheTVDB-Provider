@@ -106,6 +106,10 @@ class Config(object):
     # has no aired-order episodes, serve its default order rather than an
     # empty show - Plex takes an empty container as final.
     order_fallback = _bool('TVDB_ORDER_FALLBACK', True)
+    # Only list an alternate order (DVD, absolute, ...) when it contains
+    # every released aired episode. Off (the default) lists partial orders
+    # as well, and picking one leaves the missing episodes without metadata.
+    full_orders_only = _bool('TVDB_FULL_ORDERS_ONLY', False)
 
     # --- matching ---
     language = _str('TVDB_LANGUAGE', 'eng')

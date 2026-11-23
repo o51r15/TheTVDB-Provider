@@ -37,7 +37,7 @@ Firefly is a good test, because its orders differ:
 | TheTVDB (DVD Order) | Serenity | 14 episodes, 3 specials in season 0 |
 | TheTVDB (Absolute Order) | Serenity | One run of 15. TheTVDB counts the 2005 film as number 15 |
 
-The menu for each show only lists the orders that apply to it.
+The menu for each show only lists the orders that have episodes. TheTVDB sometimes has an order that stops short of the show, and if you pick one of those, the episodes it's missing come up without metadata. Set `TVDB_FULL_ORDERS_ONLY=true` to only list orders that include every episode released so far.
 
 ## Features
 
@@ -140,6 +140,7 @@ Everything is an environment variable. The provider API has no settings page in 
 | `TVDB_PIN` | | Your subscriber PIN. Needed with a user-supported key, not with a licensed one |
 | `TVDB_LANGUAGE` | `eng` | Language for translations and artwork |
 | `TVDB_ORDER_FALLBACK` | `true` | If a show has no aired-order episodes, serve its default order instead of nothing |
+| `TVDB_FULL_ORDERS_ONLY` | `false` | `true` only lists an order (DVD, absolute and so on) if it has every released episode. With `false`, partial orders are listed too, and episodes they're missing lose their metadata when picked |
 | `TVDB_EPISODE_CACHE_TTL` | `86400` | Episode lists are the slowest call and rarely change |
 | `TVDB_MATCH_BY_ID_HINT` | `true` | Use `{tvdb-…}`, `{imdb-…}` and `{tmdb-…}` from folder and file names |
 
@@ -173,7 +174,7 @@ Image tags have no `v` in front, even though git tags do: `git tag v1.0.1` build
 python3 tests/test_provider.py
 ```
 
-35 tests. TheTVDB is stubbed, so no key is needed. Each one was written for a bug that actually happened: the config fallbacks, the many names Plex uses for the same hint, id hints, artwork language ranking, the cache, and how episode orders are listed, requested and carried in keys.
+38 tests. TheTVDB is stubbed, so no key is needed. Each one was written for a bug that actually happened: the config fallbacks, the many names Plex uses for the same hint, id hints, artwork language ranking, the cache, and how episode orders are listed, requested and carried in keys.
 
 ## Documentation
 

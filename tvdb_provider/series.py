@@ -16,6 +16,7 @@ aired order.
 """
 import logging
 import re
+from datetime import date
 
 from flask import Blueprint, jsonify, request
 
@@ -154,18 +155,61 @@ def offered_orders(extended):
     return [(slug, label) for slug, (_, label) in ordered]
 
 
-def playable_orders(series_id, extended):
-    """offered_orders, minus any order with no episodes in it.
+def released_episode_ids(series_id, today=None):
+    """Ids of the regular (non-special) aired-order episodes already out.
 
-    TheTVDB can carry season rows for an order with nothing in them - AEW
-    Dynamite has DVD seasons and no DVD episodes. Listed anyway, Plex
-    offers the order, and picking it hands Plex a show with no seasons.
+    Specials are left out because orders group them differently, and
+    episodes with no air date or one in the future are left out because
+    no other order can be expected to have them yet.
+    """
+    today = today or date.today().isoformat()
+    out = set()
+    for ep in tvdb.series_episodes(series_id, DEFAULT_ORDER) or []:
+        if not isinstance(ep, dict) or ep.get('seasonNumber') == 0:
+            continue
+        aired = mapping.date_of(ep)
+        if aired and aired <= today and ep.get('id') is not None:
+            out.add(mapping.text_of(ep['id']))
+    return out
+
+
+def playable_orders(series_id, extended):
+    """offered_orders, minus the orders that would lose episodes.
+
+    An order with no episodes is never listed. TheTVDB can carry season
+    rows for an order with nothing in them (AEW Dynamite has DVD seasons
+    and no DVD episodes), and picking it hands Plex a show with no seasons.
+
+    With TVDB_FULL_ORDERS_ONLY on, an order is also dropped unless it
+    contains every released aired episode. Abby's DVD order on TheTVDB
+    stops two episodes short, so picking it left those files with no
+    metadata. Off (the default) lists partial orders too.
+
     Aired is kept regardless: it is the default and has the fallback.
-    Episode lists are cached for a day, so the check is cheap after the
+    Episode lists are cached for a day, so the checks are cheap after the
     first request.
     """
-    return [(slug, label) for slug, label in offered_orders(extended)
-            if slug == 'official' or tvdb.series_episodes(series_id, slug)]
+    out, released = [], None
+    for slug, label in offered_orders(extended):
+        if slug == DEFAULT_ORDER:
+            out.append((slug, label))
+            continue
+        rows = tvdb.series_episodes(series_id, slug)
+        if not rows:
+            continue
+        if config.full_orders_only:
+            if released is None:
+                released = released_episode_ids(series_id)
+            have = {mapping.text_of(r.get('id')) for r in rows
+                    if isinstance(r, dict)}
+            missing = released - have
+            if missing:
+                log.debug('series %s: %r order is missing %d released '
+                          'episode(s); not listed', series_id, slug,
+                          len(missing))
+                continue
+        out.append((slug, label))
+    return out
 
 
 def season_type_block(extended, series_id=None):

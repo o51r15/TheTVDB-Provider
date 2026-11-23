@@ -304,18 +304,69 @@ class EpisodeOrderTest(unittest.TestCase):
         ],
     }
 
+    # Abby's on TheTVDB: a DVD order that leaves out released episodes.
+    # Same numbering otherwise, so it is an unfinished copy of aired order.
+    PARTIAL = {
+        'id': 354020, 'name': "Abby's", 'firstAired': '2019-03-28',
+        'seasons': [
+            {'id': 11, 'number': 1,
+             'type': {'id': 1, 'type': 'official', 'name': 'Aired Order'}},
+            {'id': 12, 'number': 1,
+             'type': {'id': 2, 'type': 'dvd', 'name': 'DVD Order'}},
+        ],
+    }
+    PARTIAL_EPISODES = {
+        'official': [
+            {'id': 101, 'seasonNumber': 1, 'number': 1, 'name': 'Pilot',
+             'aired': '2019-03-28'},
+            {'id': 102, 'seasonNumber': 1, 'number': 2,
+             'name': 'Rule Change', 'aired': '2019-03-28'},
+            {'id': 103, 'seasonNumber': 1, 'number': 3,
+             'name': 'Free Alcohol Day', 'aired': '2019-04-04'},
+        ],
+        'dvd': [
+            {'id': 103, 'seasonNumber': 1, 'number': 3,
+             'name': 'Free Alcohol Day', 'aired': '2019-04-04'},
+        ],
+    }
+
+    # A show still airing: the DVD order has everything released so far
+    # and only lacks an episode that hasn't aired yet.
+    AIRING = {
+        'id': 500, 'name': 'Still Airing', 'firstAired': '2025-01-01',
+        'seasons': PARTIAL['seasons'],
+    }
+    AIRING_EPISODES = {
+        'official': [
+            {'id': 501, 'seasonNumber': 1, 'number': 1, 'name': 'One',
+             'aired': '2025-01-01'},
+            {'id': 502, 'seasonNumber': 1, 'number': 2, 'name': 'Two',
+             'aired': '2099-01-01'},
+            {'id': 509, 'seasonNumber': 0, 'number': 1, 'name': 'Special',
+             'aired': '2025-02-01'},
+        ],
+        'dvd': [
+            {'id': 501, 'seasonNumber': 1, 'number': 1, 'name': 'One',
+             'aired': '2025-01-01'},
+        ],
+    }
+
     @classmethod
     def setUpClass(cls):
         cls.saved = {}
         aired = {e['id']: e for e in cls.EPISODES['official']}
+        shows = {'78874': (cls.SERIES, cls.EPISODES),
+                 '354020': (cls.PARTIAL, cls.PARTIAL_EPISODES),
+                 '500': (cls.AIRING, cls.AIRING_EPISODES)}
+        record = lambda sid: shows.get(str(sid), (None, {}))[0]
         stubs = {
             'login': lambda: True,
-            'series': lambda sid: cls.SERIES if str(sid) == '78874' else None,
-            'series_extended': lambda sid, short=False:
-                cls.SERIES if str(sid) == '78874' else None,
+            'series': record,
+            'series_extended': lambda sid, short=False: record(sid),
             'series_translation': lambda sid, lang: None,
             'series_episodes': lambda sid, kind='default', lang=None,
-                page=None: list(cls.EPISODES.get(kind, [])),
+                page=None: list(shows.get(str(sid), (None, {}))[1]
+                                .get(kind, [])),
             'episode': lambda eid: aired.get(int(eid)),
             'episode_extended': lambda eid: aired.get(int(eid)),
             'episode_translation': lambda eid, lang: None,
@@ -349,6 +400,37 @@ class EpisodeOrderTest(unittest.TestCase):
         show = self.get('/library/metadata/show-78874')[0]
         self.assertNotIn('tvdbAbsolute',
                          [t['id'] for t in show['SeasonType']])
+
+    def order_ids(self, series_id):
+        show = self.get('/library/metadata/show-%s' % series_id)[0]
+        return [t['id'] for t in show.get('SeasonType', [])]
+
+    def strict(self, on=True):
+        # The provider's own config object: ConfigTest reloads the module,
+        # so importing config here would patch a copy it never reads.
+        from tvdb_provider import series
+        series.config.full_orders_only = on
+
+    def test_partial_order_offered_by_default(self):
+        self.assertEqual(self.order_ids(354020), ['tvdbAiring', 'tvdbDvd'])
+
+    def test_partial_order_hidden_when_flag_on(self):
+        # Abby's DVD order left out two released episodes, and picking it
+        # left those files with no metadata.
+        self.strict()
+        try:
+            self.assertEqual(self.order_ids(354020), ['tvdbAiring'])
+        finally:
+            self.strict(False)
+
+    def test_unaired_and_special_episodes_not_required(self):
+        # With the flag on, a show still airing keeps its DVD order when
+        # the only gaps are an episode that hasn't aired and a special.
+        self.strict()
+        try:
+            self.assertEqual(self.order_ids(500), ['tvdbAiring', 'tvdbDvd'])
+        finally:
+            self.strict(False)
 
     def test_no_order_defaults_to_aired(self):
         eps = self.get('/library/metadata/season-78874-official-1/children')
