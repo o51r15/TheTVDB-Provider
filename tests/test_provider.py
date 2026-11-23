@@ -278,5 +278,131 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(tvdb._episode_rows(None), [])
 
 
+class SelectableOrderTest(unittest.TestCase):
+    """The /test provider: SeasonType on the show, episodeOrder honoured.
+
+    Two episodes whose positions swap between aired and DVD order, the
+    Firefly shape, so a wrong order is visible in the numbering.
+    """
+    SERIES = {
+        'id': 78874, 'name': 'Firefly', 'firstAired': '2002-09-20',
+        'seasons': [
+            {'id': 1, 'number': 1,
+             'type': {'id': 1, 'type': 'official', 'name': 'Aired Order'}},
+            {'id': 2, 'number': 1,
+             'type': {'id': 2, 'type': 'dvd', 'name': 'DVD Order'}},
+        ],
+    }
+    EPISODES = {
+        'official': [
+            {'id': 10, 'seriesId': 78874, 'seasonNumber': 1, 'number': 1,
+             'name': 'The Train Job'},
+            {'id': 20, 'seriesId': 78874, 'seasonNumber': 1, 'number': 2,
+             'name': 'Serenity'},
+        ],
+        'dvd': [
+            {'id': 20, 'seriesId': 78874, 'seasonNumber': 1, 'number': 1,
+             'name': 'Serenity'},
+            {'id': 10, 'seriesId': 78874, 'seasonNumber': 1, 'number': 2,
+             'name': 'The Train Job'},
+        ],
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.saved = {}
+        aired = {e['id']: e for e in cls.EPISODES['official']}
+        stubs = {
+            'login': lambda: True,
+            'series': lambda sid: cls.SERIES if str(sid) == '78874' else None,
+            'series_extended': lambda sid, short=False:
+                cls.SERIES if str(sid) == '78874' else None,
+            'series_translation': lambda sid, lang: None,
+            'series_episodes': lambda sid, kind='default', lang=None,
+                page=None: list(cls.EPISODES.get(kind, [])),
+            'episode': lambda eid: aired.get(int(eid)),
+            'episode_extended': lambda eid: aired.get(int(eid)),
+            'episode_translation': lambda eid, lang: None,
+        }
+        for fn, stub in stubs.items():
+            cls.saved[fn] = getattr(tvdb, fn)
+            setattr(tvdb, fn, stub)
+        from tvdb_provider import app as app_mod
+        cls.client = app_mod.create_app().test_client()
+
+    @classmethod
+    def tearDownClass(cls):
+        for fn, original in cls.saved.items():
+            setattr(tvdb, fn, original)
+
+    def get(self, path):
+        response = self.client.get('/test' + path)
+        self.assertEqual(response.status_code, 200, path)
+        return response.get_json()['MediaContainer']['Metadata']
+
+    def test_show_lists_orders_in_plex_form_aired_first(self):
+        show = self.get('/library/metadata/show-78874')[0]
+        self.assertEqual(
+            [(t['id'], t['tag'], t['title']) for t in show['SeasonType']],
+            [('tvdbAiring', 'Aired', 'TheTVDB (Aired Order)'),
+             ('tvdbDvd', 'DVD', 'TheTVDB (DVD Order)')])
+
+    def test_no_order_defaults_to_aired(self):
+        eps = self.get('/library/metadata/season-78874-official-1/children')
+        self.assertEqual([e['title'] for e in eps],
+                         ['The Train Job', 'Serenity'])
+
+    def test_both_parameter_spellings_switch_order(self):
+        for name in ('episodeOrder', 'episodeOrdering'):
+            seasons = self.get('/library/metadata/show-78874/children?'
+                               '%s=tvdbDvd' % name)
+            self.assertEqual(seasons[0]['ratingKey'], 'season-78874-dvd-1')
+
+    def test_order_survives_in_keys_down_the_tree(self):
+        show = self.get('/library/metadata/show-78874?includeChildren=1'
+                        '&episodeOrder=tvdbDvd')[0]
+        season = show['Children']['Metadata'][0]
+        eps = self.get('/library/metadata/%s/children' % season['ratingKey'])
+        self.assertEqual([(e['index'], e['title'], e['ratingKey'])
+                          for e in eps],
+                         [(1, 'Serenity', 'ep-20-dvd'),
+                          (2, 'The Train Job', 'ep-10-dvd')])
+        self.assertEqual(eps[0]['parentRatingKey'], 'season-78874-dvd-1')
+
+    def test_single_episode_is_renumbered_for_its_order(self):
+        # The episode record carries aired numbering; served in DVD order
+        # it must take the DVD position or Plex files it in the wrong slot.
+        ep = self.get('/library/metadata/ep-10-dvd')[0]
+        self.assertEqual((ep['parentIndex'], ep['index']), (1, 2))
+        ep = self.get('/library/metadata/ep-10-official')[0]
+        self.assertEqual((ep['parentIndex'], ep['index']), (1, 1))
+
+    def test_order_the_show_lacks_returns_no_seasons(self):
+        self.assertEqual(self.get('/library/metadata/show-78874/children?'
+                                  'episodeOrder=tvdbAbsolute'), [])
+        show = self.get('/library/metadata/show-78874?includeChildren=1'
+                        '&episodeOrder=tvdbAbsolute')[0]
+        self.assertEqual(show['Children']['size'], 0)
+
+    def test_season_match_honours_order_in_hints(self):
+        response = self.client.post('/test/library/metadata/matches', json={
+            'type': 3, 'parentGuid': 'tvdb-78874', 'index': 1,
+            'includeChildren': 1, 'episodeOrder': 'tvdbDvd'})
+        season = response.get_json()['MediaContainer']['Metadata'][0]
+        self.assertEqual(season['ratingKey'], 'season-78874-dvd-1')
+        self.assertEqual(season['Children']['Metadata'][0]['title'],
+                         'Serenity')
+
+    def test_fixed_order_providers_keep_their_keys(self):
+        # The one-agent-per-order providers are untouched: no SeasonType,
+        # no order in their keys.
+        response = self.client.get('/dvd/library/metadata/show-78874/children')
+        seasons = response.get_json()['MediaContainer']['Metadata']
+        self.assertEqual(seasons[0]['ratingKey'], 'season-78874-1')
+        show = self.client.get('/dvd/library/metadata/show-78874') \
+            .get_json()['MediaContainer']['Metadata'][0]
+        self.assertNotIn('SeasonType', show)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

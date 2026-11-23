@@ -93,6 +93,20 @@ def create_app():
             'seasonType': order,
         }
 
+    if config.test_provider:
+        identifier = '%s.test' % config.identifier
+        title = '%s (Test - Selectable Order)' % config.title
+        app.register_blueprint(
+            series.make_tv_provider('test', identifier, title, 'official',
+                                    selectable=True),
+            url_prefix='/test')
+        registered['test'] = {
+            'path': '/test',
+            'identifier': identifier,
+            'title': title,
+            'seasonType': 'selectable (default official)',
+        }
+
     if not registered:
         log.error('no providers registered; check TVDB_ORDER_PROVIDERS')
 

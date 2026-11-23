@@ -138,6 +138,10 @@ class Config(object):
     # its default order rather than returning an empty season - an empty
     # container is taken by Plex as authoritative.
     order_fallback = _bool('TVDB_ORDER_FALLBACK', True)
+    # /test: one provider whose shows list their orders in SeasonType, so
+    # Plex's own per-show Episode ordering setting chooses. Defaults to
+    # aired order. Under test alongside the one-agent-per-order providers.
+    test_provider = _bool('TVDB_TEST_PROVIDER', True)
 
     # --- matching ---
     language = _str('TVDB_LANGUAGE', 'eng')

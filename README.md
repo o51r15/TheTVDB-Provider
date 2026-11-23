@@ -122,6 +122,12 @@ One container, one provider per order. Register whichever you need.
 
 Set `TVDB_ORDER_PROVIDERS` to change the set. `GET /orders` shows what TheTVDB offers and which are registered.
 
+### `/test` — per-show ordering through Plex (under test)
+
+`/test` registers **TheTVDB (Test - Selectable Order)**, a single provider that defaults to aired order and lists each show's TheTVDB orders in a `SeasonType` array. Those orders then appear in Plex's own **Edit → Advanced → Episode ordering** setting for each show, and Plex sends the choice back as `episodeOrder` (`episodeOrdering` is read too). Ids follow Plex's naming: `tvdbAiring`, `tvdbDvd`, `tvdbAbsolute`, `tvdbAlternate`, and so on. An order the show doesn't have returns no seasons, as Plex's spec requires. Its season and episode keys carry the order (`season-78874-dvd-1`, `ep-20-dvd`), because one provider serves them all.
+
+Every request to `/test` is logged with its query string and match body, so the container log shows exactly what Plex sends. Set `TVDB_TEST_PROVIDER=false` to remove it.
+
 ## Plex Setup
 
 1. **Settings → Metadata Agents → Add Provider** → `http://your-server:8081/absolute`

@@ -17,8 +17,17 @@ Rating keys are prefixed so one metadata endpoint can dispatch on them:
     show-<seriesId>                e.g. show-121361
     season-<seriesId>-<seasonNo>   e.g. season-121361-3
     ep-<episodeId>                 e.g. ep-9123456
+
+The selectable provider (/test) is the exception to one-order-per-agent.
+It advertises each show's orders in a `SeasonType` array, so they appear
+in Plex's own Edit -> Advanced -> Episode ordering menu, and serves
+whichever one Plex asks for. One provider then serves several orders, so
+its season and episode keys carry the order:
+    season-<seriesId>-<order>-<seasonNo>   e.g. season-121361-dvd-3
+    ep-<episodeId>-<order>                 e.g. ep-9123456-dvd
 """
 import logging
+import re
 
 from flask import Blueprint, jsonify, request
 
@@ -36,16 +45,30 @@ def show_key(series_id):
     return 'show-%s' % mapping.safe_rating_key(series_id)
 
 
-def season_key(series_id, season_no):
+def season_key(series_id, season_no, key_order=None):
+    if key_order:
+        return 'season-%s-%s-%s' % (mapping.safe_rating_key(series_id),
+                                    key_order, season_no)
     return 'season-%s-%s' % (mapping.safe_rating_key(series_id), season_no)
 
 
-def episode_key(episode_id):
+def episode_key(episode_id, key_order=None):
+    if key_order:
+        return 'ep-%s-%s' % (mapping.safe_rating_key(episode_id), key_order)
     return 'ep-%s' % mapping.safe_rating_key(episode_id)
 
 
+# Season-type slugs are lowercase letters only (official, dvd, absolute,
+# alternate, regional, altdvd, alttwo, default), which is what lets an
+# ordered key be told apart from a plain one.
+ORDERED_SEASON_RE = re.compile(r'^season-(\d+)-([a-z]+)-(\d+)$')
+ORDERED_EPISODE_RE = re.compile(r'^ep-(\d+)-([a-z]+)$')
+
+
 def parse_key(rating_key):
-    """-> (kind, series_id|episode_id, season_no|None)
+    """-> (kind, series_id|episode_id, season_no|None, order|None)
+
+    order is set only for the selectable provider's ordered keys.
 
     An unparseable key yields (None, None, None) so the route can 404.
     Validating the season segment matters: 'season-121361' with no season
@@ -54,19 +77,28 @@ def parse_key(rating_key):
     which Plex discards silently.
     """
     rating_key = mapping.text_of(rating_key)
+    found = ORDERED_SEASON_RE.match(rating_key)
+    if found:
+        return 'season', found.group(1), int(found.group(3)), found.group(2)
+    found = ORDERED_EPISODE_RE.match(rating_key)
+    if found:
+        return 'episode', found.group(1), None, found.group(2)
     if rating_key.startswith('season-'):
         rest = rating_key[len('season-'):]
         series_id, _, season_no = rest.rpartition('-')
         if not series_id or not season_no.isdigit():
-            return None, None, None
-        return 'season', series_id, int(season_no)
+            return None, None, None, None
+        return 'season', series_id, int(season_no), None
     if rating_key.startswith('show-'):
         ident = rating_key[len('show-'):]
-        return ('show', ident, None) if ident else (None, None, None)
+        return ('show', ident, None, None) if ident else NO_KEY
     if rating_key.startswith('ep-'):
         ident = rating_key[len('ep-'):]
-        return ('episode', ident, None) if ident else (None, None, None)
-    return None, None, None
+        return ('episode', ident, None, None) if ident else NO_KEY
+    return NO_KEY
+
+
+NO_KEY = (None, None, None, None)
 
 
 # ------------------------------------------------------------------- ordering
@@ -81,7 +113,76 @@ def resolve_order(series_id, default_order):
                                       default_order)
 
 
-def ordered_episodes(series_id, order):
+# Plex's own ids for TheTVDB orders are tvdbAiring / tvdbDvd / tvdbAbsolute
+# (its docs example and its own provider's episodeOrder=tvdbAiring), so the
+# SeasonType ids follow that form. Plain TheTVDB slugs are accepted too.
+def to_plex_order(slug):
+    if slug == 'official':
+        return 'tvdbAiring'
+    return 'tvdb%s' % slug.capitalize()
+
+
+def from_plex_order(value):
+    """A Plex episodeOrder value -> TheTVDB slug, or None if it is not
+    one of ours (tmdbAiring, say)."""
+    value = mapping.text_of(value).strip()
+    low = value.lower()
+    if low in ('tvdbairing', 'aired', 'official'):
+        return 'official'
+    if low.startswith('tvdb') and low[4:].isalpha():
+        return low[4:]
+    if low.isalpha():
+        return low
+    return None
+
+
+def requested_order(source):
+    """The order Plex asked for, under either spelling, or None.
+
+    Plex's docs call the parameter `episodeOrdering`; its endpoint
+    reference and its own provider use `episodeOrder`. Both are read until
+    a server log shows which one actually arrives.
+    """
+    if not hasattr(source, 'get'):
+        return None
+    for name in ('episodeOrder', 'episodeOrdering'):
+        value = source.get(name)
+        if value not in (None, ''):
+            return value
+    return None
+
+
+def offered_orders(extended):
+    """-> [(slug, label)] for the season types this series has seasons in,
+    aired first."""
+    seen = {}
+    rows = (extended or {}).get('seasons') or []
+    for row in rows:
+        kind = row.get('type') if isinstance(row, dict) else None
+        if not isinstance(kind, dict):
+            continue
+        slug = mapping.text_of(kind.get('type')).lower()
+        if not slug.isalpha() or slug in seen:
+            continue
+        label = mapping.text_of(kind.get('alternateName')
+                                or kind.get('name') or slug)
+        seen[slug] = (kind.get('id') or 99, label)
+    ordered = sorted(seen.items(),
+                     key=lambda kv: (kv[0] != 'official', kv[1][0]))
+    return [(slug, label) for slug, (_, label) in ordered]
+
+
+def season_type_block(extended):
+    """The SeasonType array Plex reads to fill its episode-ordering menu."""
+    out = []
+    for slug, label in offered_orders(extended):
+        tag = label[:-len(' Order')] if label.endswith(' Order') else label
+        out.append({'id': to_plex_order(slug), 'source': 'tvdb',
+                    'tag': tag, 'title': '%s (%s)' % (config.title, label)})
+    return out
+
+
+def ordered_episodes(series_id, order, fallback=True):
     """Episodes of a series in the wanted order, or None on failure.
 
     Falls back to the series' default order when the requested one holds
@@ -94,7 +195,7 @@ def ordered_episodes(series_id, order):
         return rows
     if rows is None:
         return None
-    if config.order_fallback and order != 'default':
+    if fallback and config.order_fallback and order != 'default':
         log.info('series %s has no episodes in %r order; using default',
                  series_id, order)
         return tvdb.series_episodes(series_id, 'default')
@@ -123,7 +224,7 @@ def episode_numbers(ep, order):
 # -------------------------------------------------------------------- mapping
 
 def series_to_show(series, identifier, extended=None, translations=None,
-                   order=None):
+                   order=None, selectable=False):
     series_id = series.get('id')
     rating_key = show_key(series_id)
     record = extended if isinstance(extended, dict) else series
@@ -200,18 +301,22 @@ def series_to_show(series, identifier, extended=None, translations=None,
     # Useful for debugging a mismatched library: the order actually served.
     if order:
         item['slug'] = mapping.text_of(record.get('slug'))
+    if selectable:
+        types = season_type_block(extended or series)
+        if types:
+            item['SeasonType'] = types
     return item
 
 
 def make_season(series, season_no, identifier, episode_count=None,
-                series_id=None, poster=None):
+                series_id=None, poster=None, key_order=None):
     # The caller passes the id from the requested key so the response
     # echoes the ratingKey Plex asked for; rebuilding it from the record
     # would produce a different key on any alias or redirect, and Plex
     # discards a response whose key it did not request.
     if series_id is None:
         series_id = series.get('id')
-    rating_key = season_key(series_id, season_no)
+    rating_key = season_key(series_id, season_no, key_order)
     parent_rk = show_key(series_id)
     series_title = mapping.text_of(series.get('name'))
 
@@ -239,13 +344,14 @@ def make_season(series, season_no, identifier, episode_count=None,
     return item
 
 
-def episode_to_item(ep, identifier, order, series=None, translations=None):
+def episode_to_item(ep, identifier, order, series=None, translations=None,
+                    key_order=None):
     episode_id = ep.get('id')
-    rating_key = episode_key(episode_id)
+    rating_key = episode_key(episode_id, key_order)
     series_id = ep.get('seriesId') or (series or {}).get('id')
     season_no, number = episode_numbers(ep, order)
 
-    parent_rk = season_key(series_id, season_no)
+    parent_rk = season_key(series_id, season_no, key_order)
     grandparent_rk = show_key(series_id)
 
     item = {
@@ -412,13 +518,54 @@ def seasons_from(episodes, order):
 
 # --------------------------------------------------------------- the provider
 
-def make_tv_provider(name, identifier, title, order):
+def make_tv_provider(name, identifier, title, order, selectable=False):
     """One TV provider bound to one TheTVDB season type.
 
     Registered once per order, so the agent dropdown in Plex becomes the
     ordering picker.
+
+    With selectable=True, `order` is only the default: each show lists its
+    orders in SeasonType, Plex's per-show Episode ordering setting picks
+    one, and Plex sends it back as episodeOrder.
     """
     bp = Blueprint(name, __name__)
+
+    if selectable:
+        @bp.before_request
+        def log_request():
+            # Which parameter name Plex really sends is still unconfirmed,
+            # so every request is logged with its query string while this
+            # provider is under test.
+            log.info('[%s] %s %s args=%s body=%s', name, request.method,
+                     request.path, request.args.to_dict(),
+                     request.get_json(silent=True) if request.method == 'POST'
+                     else None)
+
+    def choose(series_id, source=None, key_order=None):
+        """-> (season type to serve, fallback allowed, order for keys).
+
+        A None season type means Plex asked for an order this series does
+        not have; Plex's docs say to return no seasons then, rather than
+        quietly serving a different order.
+        """
+        default = resolve_order(series_id, order)
+        if not selectable:
+            return default, True, None
+        if key_order:
+            return key_order, key_order == default, key_order
+        asked = requested_order(source) or requested_order(request.args)
+        if asked is None:
+            return default, True, default
+        slug = from_plex_order(asked)
+        if slug == default:
+            return default, True, default
+        offered = [o for o, _ in
+                   offered_orders(tvdb.series_extended(series_id))]
+        if slug not in offered:
+            log.info('[%s] series %s: order %r (%s) not offered; serving '
+                     'no seasons', name, series_id, asked, slug)
+            return None, False, None
+        return slug, False, slug
 
     def box(items, offset=0, total=None):
         return container(items, identifier, offset, total)
@@ -513,7 +660,7 @@ def make_tv_provider(name, identifier, title, order):
             if not base:
                 return box([])
             item = series_to_show(base, identifier, extended, translations,
-                                  order)
+                                  order, selectable)
             item['score'] = 100
             return box([item])
 
@@ -586,8 +733,10 @@ def make_tv_provider(name, identifier, title, order):
         if not base:
             return box([])
 
-        wanted = resolve_order(series_id, order)
-        episodes = ordered_episodes(series_id, wanted)
+        wanted, fallback, korder = choose(series_id, hints)
+        if wanted is None:
+            return box([])
+        episodes = ordered_episodes(series_id, wanted, fallback)
         if episodes is None:
             return box([])
 
@@ -595,7 +744,8 @@ def make_tv_provider(name, identifier, title, order):
                      if episode_numbers(e, wanted)[0] == season_no]
         item = make_season(base, season_no, identifier, len(in_season),
                            series_id,
-                           season_posters(series_id, wanted).get(season_no))
+                           season_posters(series_id, wanted).get(season_no),
+                           korder)
         item['score'] = 100
         # Plex sends includeChildren=1 on the season match and binds its
         # files to the children in that response. A season returned
@@ -603,7 +753,8 @@ def make_tv_provider(name, identifier, title, order):
         if truthy(hints.get('includeChildren')) or wants_children():
             translations = None
             item['Children'] = children_block(
-                [episode_to_item(e, identifier, wanted, base, translations)
+                [episode_to_item(e, identifier, wanted, base, translations,
+                                 korder)
                  for e in in_season])
         return box([item])
 
@@ -618,7 +769,8 @@ def make_tv_provider(name, identifier, title, order):
         ep = tvdb.episode(episode_id)
         if not ep:
             return box([])
-        item = episode_to_item(ep, identifier, order)
+        item = episode_to_item(ep, identifier, order,
+                               key_order=order if selectable else None)
         item['score'] = 100
         return box([item])
 
@@ -649,7 +801,7 @@ def make_tv_provider(name, identifier, title, order):
 
     @bp.route('/library/metadata/<rating_key>', methods=['GET'])
     def metadata(rating_key):
-        kind, ident, season_no = parse_key(rating_key)
+        kind, ident, season_no, korder = parse_key(rating_key)
 
         # A bad key is the caller's fault whatever the upstream is doing,
         # so it answers 404 before the auth check.
@@ -663,10 +815,13 @@ def make_tv_provider(name, identifier, title, order):
             if not base:
                 return not_found()
             item = series_to_show(base, identifier, extended, translations,
-                                  order)
+                                  order, selectable)
             if wants_children():
-                wanted = resolve_order(ident, order)
-                episodes = ordered_episodes(ident, wanted)
+                wanted, fallback, korder = choose(ident)
+                if wanted is None:
+                    item['Children'] = children_block([])
+                    return box([item])
+                episodes = ordered_episodes(ident, wanted, fallback)
                 if episodes is None:
                     return not_found()
                 counts = seasons_from(episodes, wanted)
@@ -676,7 +831,7 @@ def make_tv_provider(name, identifier, title, order):
                 # nothing underneath can ever match.
                 item['Children'] = children_block(
                     [make_season(base, no, identifier, counts[no], ident,
-                                 posters.get(no))
+                                 posters.get(no), korder)
                      for no in sorted(counts)])
             return box([item])
 
@@ -684,18 +839,22 @@ def make_tv_provider(name, identifier, title, order):
             base = tvdb.series(ident)
             if not base:
                 return not_found()
-            wanted = resolve_order(ident, order)
-            episodes = ordered_episodes(ident, wanted)
+            wanted, fallback, korder = choose(ident, key_order=korder)
+            if wanted is None:
+                return not_found()
+            episodes = ordered_episodes(ident, wanted, fallback)
             if episodes is None:
                 return not_found()
             in_season = [e for e in episodes
                          if episode_numbers(e, wanted)[0] == season_no]
             item = make_season(base, season_no, identifier, len(in_season),
                                ident,
-                               season_posters(ident, wanted).get(season_no))
+                               season_posters(ident, wanted).get(season_no),
+                               korder)
             if wants_children():
                 item['Children'] = children_block(
-                    [episode_to_item(e, identifier, wanted, base)
+                    [episode_to_item(e, identifier, wanted, base,
+                                     key_order=korder)
                      for e in in_season])
             return box([item])
 
@@ -706,15 +865,35 @@ def make_tv_provider(name, identifier, title, order):
             translations = tvdb.episode_translation(ident, config.language)
             series_id = ep.get('seriesId')
             base = tvdb.series(series_id) if series_id else None
-            wanted = resolve_order(series_id, order) if series_id else order
+            if not series_id:
+                wanted, korder = order, (korder if selectable else None)
+            elif selectable:
+                wanted, fallback, korder = choose(series_id, key_order=korder)
+                if wanted is None:
+                    return not_found()
+                # The episode record carries its aired numbering. In any
+                # other order the season and number come from that order's
+                # episode list, or Plex files it in the wrong place.
+                for row in ordered_episodes(series_id, wanted,
+                                            fallback) or []:
+                    if mapping.text_of(row.get('id')) == \
+                            mapping.text_of(ep.get('id')):
+                        ep = dict(ep)
+                        for field in ('seasonNumber', 'number',
+                                      'absoluteNumber'):
+                            if field in row:
+                                ep[field] = row[field]
+                        break
+            else:
+                wanted = resolve_order(series_id, order)
             return box([episode_to_item(ep, identifier, wanted, base,
-                                        translations)])
+                                        translations, korder)])
 
         return jsonify({'error': 'unrecognised rating key'}), 404
 
     @bp.route('/library/metadata/<rating_key>/children', methods=['GET'])
     def children(rating_key):
-        kind, ident, season_no = parse_key(rating_key)
+        kind, ident, season_no, korder = parse_key(rating_key)
         start, size = paging()
 
         # An unparseable key is not an empty collection. A 200 with an
@@ -729,14 +908,16 @@ def make_tv_provider(name, identifier, title, order):
             base = tvdb.series(ident)
             if not base:
                 return not_found()
-            wanted = resolve_order(ident, order)
-            episodes = ordered_episodes(ident, wanted)
+            wanted, fallback, korder = choose(ident)
+            if wanted is None:
+                return box([], total=0)
+            episodes = ordered_episodes(ident, wanted, fallback)
             if episodes is None:
                 return not_found()
             counts = seasons_from(episodes, wanted)
             posters = season_posters(ident, wanted)
             seasons = [make_season(base, no, identifier, counts[no], ident,
-                                   posters.get(no))
+                                   posters.get(no), korder)
                        for no in sorted(counts)]
             return box(seasons[start:start + size], offset=start,
                        total=len(seasons))
@@ -745,13 +926,16 @@ def make_tv_provider(name, identifier, title, order):
             base = tvdb.series(ident)
             if not base:
                 return not_found()
-            wanted = resolve_order(ident, order)
-            episodes = ordered_episodes(ident, wanted)
+            wanted, fallback, korder = choose(ident, key_order=korder)
+            if wanted is None:
+                return not_found()
+            episodes = ordered_episodes(ident, wanted, fallback)
             if episodes is None:
                 return not_found()
             in_season = [e for e in episodes
                          if episode_numbers(e, wanted)[0] == season_no]
-            page = [episode_to_item(e, identifier, wanted, base)
+            page = [episode_to_item(e, identifier, wanted, base,
+                                    key_order=korder)
                     for e in in_season[start:start + size]]
             return box(page, offset=start, total=len(in_season))
 
@@ -764,7 +948,7 @@ def make_tv_provider(name, identifier, title, order):
 
     @bp.route('/library/metadata/<rating_key>/grandchildren', methods=['GET'])
     def grandchildren(rating_key):
-        kind, ident, _ = parse_key(rating_key)
+        kind, ident, _, _ = parse_key(rating_key)
         start, size = paging()
 
         if kind is None:
@@ -777,11 +961,14 @@ def make_tv_provider(name, identifier, title, order):
         base = tvdb.series(ident)
         if not base:
             return not_found()
-        wanted = resolve_order(ident, order)
-        episodes = ordered_episodes(ident, wanted)
+        wanted, fallback, korder = choose(ident)
+        if wanted is None:
+            return box([], total=0)
+        episodes = ordered_episodes(ident, wanted, fallback)
         if episodes is None:
             return not_found()
-        page = [episode_to_item(e, identifier, wanted, base)
+        page = [episode_to_item(e, identifier, wanted, base,
+                                key_order=korder)
                 for e in episodes[start:start + size]]
         return box(page, offset=start, total=len(episodes))
 
@@ -798,7 +985,7 @@ def make_tv_provider(name, identifier, title, order):
         times in a row for one series in the first test library - so it
         answers a container even when there is no art to give.
         """
-        kind, ident, _ = parse_key(rating_key)
+        kind, ident, _, _ = parse_key(rating_key)
         if kind is None:
             return jsonify({'error': 'unrecognised rating key'}), 404
 
