@@ -12,9 +12,8 @@ Two things here differ from the ThePornDB provider and are worth knowing:
   commercial-licence key.
 * Episode **ordering** is the reason this provider exists. Plex is
   dropping TheTVDB on 2026-12-03, and DVD/absolute ordering exists in Plex
-  only through it. TVDB_SEASON_TYPE sets the default order and
-  TVDB_ORDER_OVERRIDES sets it per series, so one library can hold
-  aired-order shows and absolute-order anime at the same time.
+  only through it. The order is chosen per show in Plex itself, so it is
+  not configured here.
 """
 import os
 import sys
@@ -68,26 +67,6 @@ def _csv(name, default=()):
     return [part.strip() for part in raw.split(',') if part.strip()]
 
 
-def _order_map(name):
-    """TVDB_ORDER_OVERRIDES='121361:dvd,79349:absolute' -> dict.
-
-    Keyed by TheTVDB series id as a string. A malformed pair is reported
-    and skipped rather than taking the whole mapping down, because this is
-    the setting most likely to be hand-edited.
-    """
-    out = {}
-    for pair in _csv(name):
-        series_id, sep, order = pair.partition(':')
-        series_id, order = series_id.strip(), order.strip().lower()
-        if not sep or not series_id or not order:
-            sys.stderr.write(
-                '%s: ignoring %r, expected <seriesId>:<seasonType>\n'
-                % (name, pair))
-            continue
-        out[series_id] = order
-    return out
-
-
 class Config(object):
     # --- upstream ---
     # Trailing slash matters: the official client builds every path by
@@ -119,29 +98,14 @@ class Config(object):
     # --- provider identity ---
     identifier = _str('TVDB_IDENTIFIER', 'tv.plex.agents.custom.tvdb')
     title = _str('TVDB_TITLE', 'TheTVDB')
-    version = _str('TVDB_VERSION', '1.0.0')
+    version = _str('TVDB_VERSION', '1.0.1')
 
-    # --- ordering: the whole point of this provider ---
-    # Each registered provider carries its own season type, so there is
-    # deliberately no single TVDB_SEASON_TYPE: the order is chosen by
-    # which provider a library points at. Set TVDB_ORDER_PROVIDERS to one
-    # value for a single-order deployment.
-    #
-    # Per-series overrides so one library can mix orderings:
-    #   TVDB_ORDER_OVERRIDES=121361:dvd,79349:absolute
-    order_overrides = _order_map('TVDB_ORDER_OVERRIDES')
-    # Expose one extra provider per listed order, each with its own
-    # identifier, for anyone who would rather separate libraries than
-    # maintain an overrides map.
-    order_providers = _csv('TVDB_ORDER_PROVIDERS')
-    # When a series has no episodes in the requested order, fall back to
-    # its default order rather than returning an empty season - an empty
-    # container is taken by Plex as authoritative.
+    # --- ordering ---
+    # Each show lists its orders to Plex and Plex picks one per show, so
+    # there is nothing to configure here except the fallback: when a show
+    # has no aired-order episodes, serve its default order rather than an
+    # empty show - Plex takes an empty container as final.
     order_fallback = _bool('TVDB_ORDER_FALLBACK', True)
-    # /test: one provider whose shows list their orders in SeasonType, so
-    # Plex's own per-show Episode ordering setting chooses. Defaults to
-    # aired order. Under test alongside the one-agent-per-order providers.
-    test_provider = _bool('TVDB_TEST_PROVIDER', True)
 
     # --- matching ---
     language = _str('TVDB_LANGUAGE', 'eng')

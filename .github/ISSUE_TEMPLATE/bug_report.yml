@@ -31,16 +31,15 @@ body:
   - type: dropdown
     id: order
     attributes:
-      label: Which provider / order
+      label: Episode order set on the show
       options:
-        - /aired (official)
-        - /dvd
-        - /absolute
-        - /alternate
-        - /regional
-        - /altdvd
-        - /alttwo
-        - /default
+        - Library default / Aired
+        - DVD
+        - Absolute
+        - Alternate
+        - Regional
+        - Alternate DVD
+        - Alternate 2
     validations:
       required: true
 
@@ -79,6 +78,4 @@ body:
       description: Redact the key and PIN.
       render: shell
       placeholder: |
-        TVDB_ORDER_PROVIDERS=official,dvd,absolute
-        TVDB_ORDER_OVERRIDES=78874:dvd
         TVDB_LANGUAGE=eng

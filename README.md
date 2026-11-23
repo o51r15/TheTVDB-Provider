@@ -2,9 +2,9 @@
 
 # tvdb-provider
 
-**Plex metadata provider for TheTVDB — and the episode orderings Plex is removing on 3 December 2026.**
+**A Plex metadata provider for TheTVDB, including its DVD, absolute and other episode orders.**
 
-An HTTP service built against the custom metadata provider API that Plex shipped in PMS 1.43.0. Each TheTVDB season type is registered as its own provider, so choosing the agent is how you choose the order — which is the control Plex is taking away.
+Plex stops using TheTVDB on 3 December 2026. This brings it back as a custom metadata provider (PMS 1.43.0 and later), using your own TheTVDB API key.
 
 [![GitHub last commit](https://img.shields.io/github/last-commit/o51r15/TheTVDB-Provider)](https://github.com/o51r15/TheTVDB-Provider)
 [![Build](https://img.shields.io/github/actions/workflow/status/o51r15/TheTVDB-Provider/build.yml?label=build)](https://github.com/o51r15/TheTVDB-Provider/actions)
@@ -17,46 +17,57 @@ An HTTP service built against the custom metadata provider API that Plex shipped
 
 ---
 
-> **Why this exists** — On **3 December 2026** TheTVDB stops being a metadata source in Plex, after Plex and TheTVDB's owner failed to agree new terms. Nothing is deleted and finished shows mostly carry on, but the legacy agent stops working and TheTVDB-ordered shows stop receiving new episodes. The part that hurts is narrower than "a database went away": **DVD and absolute ordering exist in Plex only through TheTVDB.** TMDB episode groups are the stated replacement, with no ship date and no promise they reproduce every TheTVDB order — Plex's own advice to anyone depending on alternate ordering is to keep using TheTVDB, which is the thing being switched off. Anime and DVD-order collections are the casualties, not aired-order libraries. TheTVDB's API is not going anywhere; only Plex's licence to it lapsed. With your own key the data is still there, and this serves it back.
+## Why
 
-## What It Does
+After 3 December, Plex's built-in TheTVDB agent stops working and shows that use it stop getting new episodes. Most libraries won't notice, since aired order is also available from TMDB. DVD and absolute order are different. In Plex they only ever came from TheTVDB, and Plex hasn't said when its TMDB replacement (episode groups) will ship or whether it will cover the same orders. Anime and DVD-order collections are the libraries that lose out.
 
-Plex sends a match request with whatever it knows — title, year, filename, sometimes an id hint. tvdb-provider resolves it against TheTVDB v4 and returns a fully populated show, season and episode hierarchy: real titles, summaries, air dates, runtimes, cast with headshots, genres, and language-ranked posters, backgrounds and episode stills.
+TheTVDB's API isn't going away. Plex's licence to it is. With your own key the data is still there, and this provider serves it to Plex.
 
-The ordering is the point. A provider cannot add an entry to Plex's episode-ordering dropdown — the contract exposes only `metadata` and `match` — so each season type is registered as a **separate provider with its own identifier** instead. Four agents appear in Plex, and picking one picks the order.
+## What it does
 
-Firefly, the canonical case, served three ways from the same records:
+Plex sends a match request with whatever it knows about a show: title, year, filename, sometimes an id. The provider looks the show up on TheTVDB v4 and returns the show, its seasons and episodes, with titles, summaries, air dates, runtimes, cast, genres, posters, backgrounds and episode stills.
 
-| Agent | S01E01 is | Episodes |
+Each show also tells Plex which TheTVDB episode orders it has. Plex lists them under the show's **Edit → Advanced → Episode ordering**, the same place the built-in agent put them, and you pick one per show.
+
+Firefly is a good test, because its orders differ:
+
+| Episode ordering | Season 1 starts with | What you get |
 |---|---|---|
-| **TheTVDB (Aired Order)** | The Train Job | 20 — Fox aired the pilot third |
-| **TheTVDB (DVD Order)** | Serenity | 17 |
-| **TheTVDB (Absolute Order)** | Serenity | 15, continuous, no specials |
+| TheTVDB (Aired Order) | The Train Job | 14 episodes, 6 specials in season 0 |
+| TheTVDB (DVD Order) | Serenity | 14 episodes, 3 specials in season 0 |
+| TheTVDB (Absolute Order) | Serenity | One run of 15. TheTVDB counts the 2005 film as number 15 |
+
+The menu for each show only lists the orders that apply to it.
 
 ## Features
 
-- **Ordering as agent selection** — aired, DVD, absolute and alternate each registered as their own provider; `/orders` lists what TheTVDB currently offers and which are live
-- **Per-series overrides** — `TVDB_ORDER_OVERRIDES=78874:dvd,81797:absolute` so **one** library can hold aired-order shows and absolute-order anime at once, rather than needing a library per order
-- **Season types read, not assumed** — pulled from `/seasons/types`; there are seven, including `altdvd` and `alttwo`, which a hardcoded list misses
-- **Order fallback** — a series with no episodes in the requested order serves its default rather than appearing empty, because Plex treats an empty container as final rather than something to retry
-- **Language-ranked artwork** — posters sorted by requested language then TheTVDB community score, textless art preferred over the wrong language, and a last-resort kept so a show is never left with no poster
-- **Correct artwork types** — mapped from the live `/artwork/types`; season posters are posters, banners are banners, and icons and clear-art are dropped rather than mislabelled
-- **Per-season posters** — matched by `seasonId`, and read from the season rows belonging to the order being served
-- **Translations preferred** — a Japanese show reads in English rather than romaji, with configurable fallbacks
-- **Id-hint matching** — `{tvdb-121361}` in a folder name pins a stubborn show; `{imdb-tt…}` and `{tmdb-…}` resolve through `/search/remoteid`, which covers Sonarr-managed folders carrying no TVDB id
-- **Tiered caching** — 1 hour general, 1 day for episode lists, 1 week for reference data, 5 minutes for known-absent records; 36 Plex requests cost 4 upstream calls at an 88% hit rate
-- **Single-flight** — concurrent requests for the same uncached record collapse into one upstream call
-- **Honest failures** — an auth or upstream failure answers 503, never an empty 200, because Plex believes an empty container and silently reverts the library to its built-in agent
-- **Self-check endpoint** — `/aired/selftest?q=<show>` walks login → season types → search → series → episodes → mapped documents and names the step that broke
-- **27 tests** — each written against a bug that actually occurred
-- **Docker-native** — GHCR images, non-root container, healthcheck, CI-built `:dev` and `:latest`
+- Per-show episode ordering through Plex's own menu: aired, DVD, absolute, alternate, regional, alternate DVD and alternate 2, whichever the show has
+- Season types and artwork types read from TheTVDB's live lists, not a hardcoded table
+- Posters ranked by your language first, then by TheTVDB's community score. Textless art is preferred over the wrong language
+- Season posters matched to the order you picked
+- Translations preferred, so a Japanese show comes through in English rather than romaji
+- `{tvdb-121361}` in a folder name pins a show that keeps matching wrong. `{imdb-tt…}` and `{tmdb-…}` work too, which helps with Sonarr folders that don't carry a TVDB id
+- Caching in tiers: an hour for most things, a day for episode lists, a week for reference data
+- When TheTVDB is down or your key fails, Plex gets a 503 rather than an empty answer. Plex trusts an empty answer and quietly switches the library back to its built-in agent
+- A self-test endpoint that walks through login, search, episodes and the mapped output, and tells you which step broke
+- Docker images on GHCR, non-root, with a healthcheck
 
-## Quick Start
+## Upgrading from 1.0.0
 
-### Docker Compose (recommended)
+1.0.0 got this part wrong. We believed a provider couldn't add anything to Plex's Episode ordering menu, so 1.0.0 registered one provider per order (`/aired`, `/dvd`, `/absolute`, `/alternate`) and you picked the order by picking the agent. Plex's provider docs describe exactly the per-show menu we said wasn't possible, and we missed it.
+
+1.0.1 replaces all of those with a single provider at `/tvdb`. `TVDB_ORDER_PROVIDERS` and `TVDB_ORDER_OVERRIDES` are gone too, since the order is now set per show in Plex.
+
+The new provider has a new identifier, so Plex treats it as a different agent and shows need to match again. I'd try it on a small test library before moving a big one.
+
+If you'd rather keep the 1.0.0 behaviour, pin the image to `ghcr.io/o51r15/tvdb-provider:1.0.0`.
+
+## Quick start
+
+### Docker Compose
 
 ```bash
-# 1. Create your compose file
+# 1. Get the compose file
 mkdir -p ~/tvdb-provider
 curl -o ~/tvdb-provider/docker-compose.yml \
   https://raw.githubusercontent.com/o51r15/TheTVDB-Provider/main/docker-compose.yml
@@ -64,36 +75,36 @@ curl -o ~/tvdb-provider/docker-compose.yml \
 # 2. Add your TheTVDB key
 cd ~/tvdb-provider
 echo 'TVDB_API_KEY=your-key-here' > .env
-echo 'TVDB_PIN=' >> .env            # subscriber PIN, if your key needs one
+echo 'TVDB_PIN=' >> .env            # your subscriber PIN, if your key needs one
 echo 'TZ=America/New_York' >> .env
 
-# 3. Run
+# 3. Start it
 docker compose up -d
 ```
 
-Verify: **http://your-server:8081/aired** — a `MediaProvider` document comes back when it's working. **http://your-server:8081/orders** proves the key and PIN work, since it is an authenticated call needing no series id.
+Check it: **http://your-server:8081/tvdb** should return a `MediaProvider` document. **http://your-server:8081/orders** makes an authenticated call to TheTVDB, so if it answers, your key and PIN work.
 
-> **Updating:** `docker compose pull && docker compose up -d`
+To update: `docker compose pull && docker compose up -d`
 
-> **Security:** Plex sends custom providers **unauthenticated** requests — provider auth is not implemented yet. Plex calls this "fine for development or local-only hosting" and advises waiting before publishing a public API. Keep this on your LAN.
+> **Keep it on your LAN.** Plex sends custom providers unauthenticated requests. Plex itself says that's fine for local hosting and advises against a public provider for now.
 
-### Docker Compose File
+### Compose file
 
 ```yaml
 services:
   tvdb-provider:
-    image: ghcr.io/o51r15/tvdb-provider:dev   # :latest for tagged releases
+    image: ghcr.io/o51r15/tvdb-provider:latest   # or pin a version, e.g. :1.0.1
     container_name: tvdb-provider
     restart: unless-stopped
     ports:
-      - "8081:8081"        # 8081 so it sits beside other providers on 8080
+      - "8081:8081"        # 8081 so it can sit next to another provider on 8080
     environment:
       - TZ=America/New_York
     env_file:
       - .env
 ```
 
-### From Source
+### From source
 
 ```bash
 git clone https://github.com/o51r15/TheTVDB-Provider.git && cd TheTVDB-Provider
@@ -103,148 +114,97 @@ TVDB_API_KEY=... python3 wsgi.py            # dev
 gunicorn --bind 0.0.0.0:8081 --workers 1 --threads 8 wsgi:app
 ```
 
-> **One worker, deliberately.** The cache and the single-flight lock live in process memory, so a second worker is a second cache: the same episode list gets fetched twice and `/health` reports whichever process answered. This is pure I/O against one upstream for one Plex server, so threads cover the concurrency.
+Run one worker. The cache lives in process memory, so a second worker means a second cache, double the calls to TheTVDB, and a `/health` that reports whichever worker answered. Threads handle the concurrency fine.
 
-## Providers
+## Plex setup
 
-One container, one provider per order. Register whichever you need.
+1. **Settings → Metadata Agents → Add Provider**, and enter `http://your-server:8081/tvdb`
+2. **Add Agent**, give it a name, and set the provider you just added as **Primary**
+3. Create a **TV Shows** library, or edit one, and pick that agent under **Advanced**
+4. To change a show's order: open the show, **Edit → Advanced → Episode ordering**, pick one, save, then **Refresh Metadata**
 
-| Path | Season type | Agent name in Plex | Default |
-|---|---|---|---|
-| **`/aired`** | `official` | TheTVDB (Aired Order) | **On** |
-| **`/dvd`** | `dvd` | TheTVDB (DVD Order) | **On** |
-| **`/absolute`** | `absolute` | TheTVDB (Absolute Order) | **On** |
-| **`/alternate`** | `alternate` | TheTVDB (Alternate Order) | **On** |
-| `/regional` | `regional` | TheTVDB (Regional Order) | Off |
-| `/altdvd` | `altdvd` | TheTVDB (Alternate DVD Order) | Off |
-| `/alttwo` | `alttwo` | TheTVDB (Alternate Order 2) | Off |
-| `/default` | `default` | TheTVDB (Series Default Order) | Off |
+A few things worth knowing:
 
-Set `TVDB_ORDER_PROVIDERS` to change the set. `GET /orders` shows what TheTVDB offers and which are registered.
-
-### `/test` — per-show ordering through Plex (under test)
-
-`/test` registers **TheTVDB (Test - Selectable Order)**, a single provider that defaults to aired order and lists each show's TheTVDB orders in a `SeasonType` array. Those orders then appear in Plex's own **Edit → Advanced → Episode ordering** setting for each show, and Plex sends the choice back as `episodeOrder` (`episodeOrdering` is read too). Ids follow Plex's naming: `tvdbAiring`, `tvdbDvd`, `tvdbAbsolute`, `tvdbAlternate`, and so on. An order the show doesn't have returns no seasons, as Plex's spec requires. Its season and episode keys carry the order (`season-78874-dvd-1`, `ep-20-dvd`), because one provider serves them all.
-
-Every request to `/test` is logged with its query string and match body, so the container log shows exactly what Plex sends. Set `TVDB_TEST_PROVIDER=false` to remove it.
-
-## Plex Setup
-
-1. **Settings → Metadata Agents → Add Provider** → `http://your-server:8081/absolute`
-2. **Add Agent** — name it, then set the provider you just added as **Primary**
-3. Create a **TV Shows** library and pick that agent in the library's **Advanced** pane
-
-Repeat per order you want available. Each path is a distinct provider with its own identifier, so all of them coexist as separate agents.
-
-> **Mixed libraries don't need separate agents.** Because Plex binds one agent per library, per-show ordering lives in this provider instead: `TVDB_ORDER_OVERRIDES=78874:dvd` makes that one series serve DVD order inside an otherwise aired-order library.
-
-> **A refresh never re-matches.** Items that failed to match are stored as `local://` stubs and stay that way forever. Only a fresh scan of a file Plex has not seen, or a manual **Fix Match**, creates a new binding. Fix Match one item to verify before touching a whole library.
-
-> **Artwork changes need a Refresh Metadata.** Plex caches the posters it already pulled; a provider-side change does not re-fetch art on its own.
-
-> **If a new agent doesn't appear in the dropdown,** hard-refresh Plex Web (`Ctrl+Shift+R`). The agent list is cached client-side; `GET /system/agents?mediaType=2` on the server is the source of truth.
+- **Your files still need to be numbered for the order you pick.** Plex matches files by the `S01E03` in the filename, and a provider can't change that. If your files are numbered in aired order and you switch the show to DVD, the DVD titles land on the aired-order files.
+- **A refresh doesn't re-match.** Items that failed to match stay unmatched until a new scan or a manual **Fix Match**. Fix Match one show to check things before doing a whole library.
+- **Artwork changes need a Refresh Metadata.** Plex keeps the posters it already has.
+- **If the new agent isn't in the dropdown,** hard-refresh Plex Web (`Ctrl+Shift+R`). The list is cached in the browser.
 
 ## Configuration
 
-Everything is environment variables — the provider API has no Plex-side preferences UI.
+Everything is an environment variable. The provider API has no settings page in Plex.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `TVDB_API_KEY` | — | **Required.** A v4 key from [your API page](https://www.thetvdb.com/api-information) |
-| `TVDB_PIN` | — | Your subscriber PIN. Needed for a user-supported key; a licensed key works without one |
-| `TVDB_ORDER_PROVIDERS` | `official,dvd,absolute,alternate` | Which orders to expose as agents |
-| `TVDB_ORDER_OVERRIDES` | — | Per-series order, e.g. `78874:dvd,81797:absolute` |
-| `TVDB_ORDER_FALLBACK` | `true` | Serve the default order when the requested one is empty |
-| `TVDB_LANGUAGE` | `eng` | Preferred translation and artwork language |
-| `TVDB_EPISODE_CACHE_TTL` | `86400` | Episode lists are the expensive call and the least volatile |
-| `TVDB_MATCH_BY_ID_HINT` | `true` | Honour `{tvdb-…}`, `{imdb-…}` and `{tmdb-…}` in names |
+| `TVDB_API_KEY` | | **Required.** A v4 key from [your API page](https://www.thetvdb.com/api-information) |
+| `TVDB_PIN` | | Your subscriber PIN. Needed with a user-supported key, not with a licensed one |
+| `TVDB_LANGUAGE` | `eng` | Language for translations and artwork |
+| `TVDB_ORDER_FALLBACK` | `true` | If a show has no aired-order episodes, serve its default order instead of nothing |
+| `TVDB_EPISODE_CACHE_TTL` | `86400` | Episode lists are the slowest call and rarely change |
+| `TVDB_MATCH_BY_ID_HINT` | `true` | Use `{tvdb-…}`, `{imdb-…}` and `{tmdb-…}` from folder and file names |
 
-**[Full configuration reference →](https://github.com/o51r15/TheTVDB-Provider/wiki/Configuration)** — every variable, with defaults and why it exists.
+The rest are on the **[Configuration](https://github.com/o51r15/TheTVDB-Provider/wiki/Configuration)** wiki page.
 
 ## Endpoints
 
-Each provider path exposes the same surface: the `MediaProvider` manifest at
-the root, `POST /library/metadata/matches`, and
-`/library/metadata/<ratingKey>` with `/children`, `/grandchildren`,
-`/images` and `/extras`. There is a `/selftest` per provider, plus a global
-`/health` with cache counters and `/orders`.
+The provider lives at `/tvdb`: the `MediaProvider` manifest at the root, `POST /library/metadata/matches`, and `/library/metadata/<ratingKey>` with `/children`, `/grandchildren`, `/images` and `/extras`. There's also `/tvdb/selftest?q=<show>`, plus `/health` (cache counters, nothing secret) and `/orders` (TheTVDB's season types) at the top level.
 
-**[Full endpoint reference →](https://github.com/o51r15/TheTVDB-Provider/wiki/Endpoints)**
+Plex asks for the show with `episodeOrder=tvdbDvd` (or `tvdbAiring`, `tvdbAbsolute` and so on), then fetches seasons and episodes by key alone. So the order is in the key: `season-78874-dvd-1`, `ep-297999-dvd`.
 
-## Notes on Plex's Provider API
+More on the **[Endpoints](https://github.com/o51r15/TheTVDB-Provider/wiki/Endpoints)** page.
 
-Plex's provider API has undocumented behaviour that costs real debugging time —
-paging arriving as query parameters, nested containers that must be objects
-rather than arrays, inconsistent hint key names, and the fact that a provider
-cannot influence scanning at all.
+## Notes on Plex's provider API
 
-**[Plex provider API notes →](https://github.com/o51r15/TheTVDB-Provider/wiki/Plex-Provider-API-Notes)** — each entry recorded from a real failure.
+Some of how Plex talks to providers isn't documented, and I found most of it by having things break: paging that arrives as query parameters, nested containers that have to be objects and not arrays, hint fields that change name depending on library type, and a scanner no provider can influence. Those are written up in **[Plex provider API notes](https://github.com/o51r15/TheTVDB-Provider/wiki/Plex-Provider-API-Notes)**.
 
-## Docker Images
+## Docker images
 
-| Tag | When it's built | Moves? |
+| Tag | Built | Changes? |
 |---|---|---|
-| `ghcr.io/o51r15/tvdb-provider:dev` | Every push to `main` | Yes — latest commit |
-| `ghcr.io/o51r15/tvdb-provider:latest` | Tagged releases only | Yes — newest release |
-| `ghcr.io/o51r15/tvdb-provider:1.0` | Tagged releases | Yes — newest 1.0.x |
-| `ghcr.io/o51r15/tvdb-provider:1.0.0` | The release itself | No — pin to this |
+| `ghcr.io/o51r15/tvdb-provider:dev` | On every push to `main` | Yes, follows the latest commit |
+| `ghcr.io/o51r15/tvdb-provider:latest` | On tagged releases | Yes, follows the newest release |
+| `ghcr.io/o51r15/tvdb-provider:1.0.1` | For that release | No. Pin to this |
 
-Note the image tags carry **no `v` prefix** even though the git tags do:
-`git tag v1.0.0` produces `:1.0.0`. Pin to the exact version in production;
-`:dev` is the development stream and will break.
-
-Cut a release with `git tag -a v1.0.0 -m v1.0.0 && git push origin v1.0.0`.
+Image tags have no `v` in front, even though git tags do: `git tag v1.0.1` builds `:1.0.1`. `:dev` is where changes land first and can break.
 
 ## Tests
 
 ```bash
-python3 tests/test_provider.py     # 27
+python3 tests/test_provider.py
 ```
 
-Upstream is stubbed, so no key is needed. They cover the config fallbacks, the
-order-override parser, hint-key resolution across every spelling Plex uses,
-id-hint extraction, artwork language ranking, and the cache's negative
-entries, bounds, counters and single-flight locking.
+35 tests. TheTVDB is stubbed, so no key is needed. Each one was written for a bug that actually happened: the config fallbacks, the many names Plex uses for the same hint, id hints, artwork language ranking, the cache, and how episode orders are listed, requested and carried in keys.
 
 ## Documentation
 
-- **[Configuration](https://github.com/o51r15/TheTVDB-Provider/wiki/Configuration)** — every environment variable
-- **[Endpoints](https://github.com/o51r15/TheTVDB-Provider/wiki/Endpoints)** — the HTTP surface each provider path exposes
-- **[Episode Ordering](https://github.com/o51r15/TheTVDB-Provider/wiki/Episode-Ordering)** — the season types, what Plex is losing, and how overrides work
-- **[Plex Provider API Notes](https://github.com/o51r15/TheTVDB-Provider/wiki/Plex-Provider-API-Notes)** — undocumented behaviour, each recorded from a real failure
-- **[Troubleshooting](https://github.com/o51r15/TheTVDB-Provider/wiki/Troubleshooting)** — start here when nothing matches
+- **[Configuration](https://github.com/o51r15/TheTVDB-Provider/wiki/Configuration)**: every environment variable
+- **[Endpoints](https://github.com/o51r15/TheTVDB-Provider/wiki/Endpoints)**: the HTTP side
+- **[Episode Ordering](https://github.com/o51r15/TheTVDB-Provider/wiki/Episode-Ordering)**: TheTVDB's season types, how they get into Plex's menu, and what 1.0.0 got wrong
+- **[Plex Provider API Notes](https://github.com/o51r15/TheTVDB-Provider/wiki/Plex-Provider-API-Notes)**: undocumented behaviour, found the hard way
+- **[Troubleshooting](https://github.com/o51r15/TheTVDB-Provider/wiki/Troubleshooting)**: start here when nothing matches
 
 ## Requirements
 
-- **Plex Media Server 1.43.0+** — the release that introduced custom metadata providers; there is no way to register one on an earlier server
-- **A TheTVDB v4 API key** — from [thetvdb.com/api-information](https://www.thetvdb.com/api-information). Keys are issued **per project, not per user**: a user-supported key is paired with each end user's own subscriber PIN, while a licensed key works without one. If your key requires payment you are invoiced, and it expires after 7 days unpaid
+- **Plex Media Server 1.43.0 or later.** Custom metadata providers don't exist before that
+- **A TheTVDB v4 API key** from [thetvdb.com/api-information](https://www.thetvdb.com/api-information). Keys are issued per project, not per user. A user-supported key also needs each user's subscriber PIN. A licensed key doesn't. If your key requires payment you'll be invoiced, and it expires after 7 days unpaid
 - **Docker**, or **Python 3.9+** to run from source
-- Network reachability from the Plex server to this service
+- Plex has to be able to reach the service over the network
 
-## Tech Stack
+## Tech stack
 
-Python 3.9+ (`python:3.12-slim` in the image), Flask blueprints registered once
-per season type, gunicorn, `requests` with a thread-local session, an
-in-process tiered TTL cache with negative entries and per-key single-flight,
-GitHub Actions → GHCR
+Python 3.9+ (`python:3.12-slim` in the image), Flask, gunicorn, `requests`, an in-process cache, and GitHub Actions publishing to GHCR.
 
 ## Links
 
-- [Plex Metadata Providers API](https://developer.plex.tv/pms/) — the spec this implements
-- [Custom Metadata Providers announcement](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384)
-- [TheTVDB v4 API](https://github.com/thetvdb/v4-api) — the metadata source
-- [Issues](https://github.com/o51r15/TheTVDB-Provider/issues) — bugs and feature requests
+- [Plex metadata providers API](https://developer.plex.tv/pms/), the spec this follows
+- [Custom metadata providers announcement](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384)
+- [TheTVDB v4 API](https://github.com/thetvdb/v4-api)
+- [Issues](https://github.com/o51r15/TheTVDB-Provider/issues)
 
 ## Contributing
 
-Bug reports and corrections to the API notes are the most useful thing you can
-send. [CONTRIBUTING.md](CONTRIBUTING.md) covers what to include in an issue,
-how to run the tests, and the constraints worth knowing before changing
-behaviour. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to the project's
-spaces.
+Bug reports are the most useful thing you can send, and so are corrections to the API notes. [CONTRIBUTING.md](CONTRIBUTING.md) covers what to put in an issue and how to run the tests. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies here.
 
 ## License
 
-[MIT](LICENSE). This is an independent project and is not affiliated with
-Plex or TheTVDB. TheTVDB data is subject to their own terms; you supply your
-own API key.
+[MIT](LICENSE). This is an independent project, not affiliated with Plex or TheTVDB. TheTVDB data is under their terms, and you supply your own API key.

@@ -1,19 +1,12 @@
-"""Plex custom metadata providers for TheTVDB.
+"""Plex custom metadata provider for TheTVDB.
 
 Plex is removing TheTVDB as a metadata source on 2026-12-03, and DVD and
-absolute episode ordering exist in Plex only through it. TMDB episode
-groups are the stated replacement, with no ship date and no promise that
-they reproduce every TheTVDB order.
+absolute episode ordering exist in Plex only through it.
 
-A provider cannot add an entry to Plex's episode-ordering dropdown - the
-contract exposes only `metadata` and `match`. So each season type is
-registered as its own provider instead, and choosing the agent becomes
-choosing the order:
-
-    /aired      TheTVDB (Aired Order)
-    /dvd        TheTVDB (DVD Order)
-    /absolute   TheTVDB (Absolute Order)
-    /alternate  TheTVDB (Alternate Order)
+One provider, at /tvdb. Each show lists the TheTVDB orders it has, and
+Plex shows them in that show's Episode ordering setting. Up to v1.0.0
+there was one provider per order instead (/aired, /dvd, ...); those are
+gone.
 
 Implements the provider contract documented at
 https://developer.plex.tv/pms/  (API Info -> Metadata Providers).
@@ -27,39 +20,7 @@ from . import series, tvdb
 
 log = logging.getLogger(__name__)
 
-# season type -> (url path, blueprint name, human label)
-#
-# These are TheTVDB's real season types, read from /seasons/types rather
-# than assumed: aired order is the type 'official' (id 1), and there are
-# two more alternates than the obvious list suggests.
-#
-#   id=1 official   Aired Order          id=5 regional  Regional Order
-#   id=2 dvd        DVD Order            id=6 altdvd    Alternate DVD Order
-#   id=3 absolute   Absolute Order       id=7 alttwo    Alternate Order 2
-#   id=4 alternate  Alternate Order
-#
-# 'default' is not a type - it is TheTVDB's shorthand for whichever order
-# a given series calls its own. Offered separately for anyone who wants
-# that rather than a fixed order.
-ORDERS = {
-    'official': ('/aired', 'aired', 'Aired Order'),
-    'dvd': ('/dvd', 'dvd', 'DVD Order'),
-    'absolute': ('/absolute', 'absolute', 'Absolute Order'),
-    'alternate': ('/alternate', 'alternate', 'Alternate Order'),
-    'regional': ('/regional', 'regional', 'Regional Order'),
-    'altdvd': ('/altdvd', 'altdvd', 'Alternate DVD Order'),
-    'alttwo': ('/alttwo', 'alttwo', 'Alternate Order 2'),
-    'default': ('/default', 'default', 'Series Default Order'),
-}
-
-# Accepted spellings for the same thing, so TVDB_ORDER_PROVIDERS=aired
-# does what it looks like it does.
-ALIASES = {'aired': 'official', 'air': 'official', 'tvdb': 'official'}
-
-# Registered when TVDB_ORDER_PROVIDERS is unset: aired, plus the two
-# orders Plex is actually taking away, plus alternate for the anime that
-# uses it.
-DEFAULT_ORDERS = ('official', 'dvd', 'absolute', 'alternate')
+PATH = '/tvdb'
 
 
 def create_app():
@@ -68,47 +29,9 @@ def create_app():
         format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
     app = Flask(__name__)
-    registered = {}
-
-    wanted = config.order_providers or list(DEFAULT_ORDERS)
-    for order in wanted:
-        order = order.strip().lower()
-        order = ALIASES.get(order, order)
-        if order not in ORDERS:
-            log.warning('TVDB_ORDER_PROVIDERS: unknown order %r, skipping '
-                        '(known: %s)', order, ', '.join(sorted(ORDERS)))
-            continue
-        path, name, label = ORDERS[order]
-        identifier = '%s.%s' % (config.identifier, name)
-        title = '%s (%s)' % (config.title, label)
-        if name in registered:
-            continue
-        app.register_blueprint(
-            series.make_tv_provider(name, identifier, title, order),
-            url_prefix=path)
-        registered[name] = {
-            'path': path,
-            'identifier': identifier,
-            'title': title,
-            'seasonType': order,
-        }
-
-    if config.test_provider:
-        identifier = '%s.test' % config.identifier
-        title = '%s (Test - Selectable Order)' % config.title
-        app.register_blueprint(
-            series.make_tv_provider('test', identifier, title, 'official',
-                                    selectable=True),
-            url_prefix='/test')
-        registered['test'] = {
-            'path': '/test',
-            'identifier': identifier,
-            'title': title,
-            'seasonType': 'selectable (default official)',
-        }
-
-    if not registered:
-        log.error('no providers registered; check TVDB_ORDER_PROVIDERS')
+    app.register_blueprint(
+        series.make_tv_provider('tvdb', config.identifier, config.title),
+        url_prefix=PATH)
 
     @app.route('/health')
     def health():
@@ -117,12 +40,11 @@ def create_app():
             'apiKeyConfigured': bool(config.api_key),
             'pinConfigured': bool(config.pin),
             'language': config.language,
-            'providers': registered,
-            'orderOverrides': config.order_overrides,
+            'provider': {'path': PATH, 'identifier': config.identifier,
+                         'title': config.title, 'version': config.version},
             'orderFallback': config.order_fallback,
             'cache': tvdb.cache_stats(),
-            'selftest': '%s/selftest?q=<show>' % (
-                list(registered.values())[0]['path'] if registered else ''),
+            'selftest': '%s/selftest?q=<show>' % PATH,
         })
 
     @app.route('/orders')
@@ -144,9 +66,7 @@ def create_app():
             'seasonTypes': [
                 {'id': t.get('id'),
                  'name': t.get('name'),
-                 'type': t.get('type'),
-                 'registered': t.get('type') in
-                 [v['seasonType'] for v in registered.values()]}
+                 'type': t.get('type')}
                 for t in types if isinstance(t, dict)
             ],
         })
@@ -179,6 +99,5 @@ def create_app():
     else:
         log.error('TheTVDB rejected the API key and PIN')
 
-    log.info('registered %d provider(s): %s', len(registered),
-             ', '.join(sorted(registered)))
+    log.info('provider %s registered at %s', config.identifier, PATH)
     return app

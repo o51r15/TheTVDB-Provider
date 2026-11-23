@@ -59,15 +59,6 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg.config.timeout, 30)
         reload_config(TVDB_TIMEOUT=None)
 
-    def test_order_map_parses_and_skips_bad_pairs(self):
-        cfg = reload_config(
-            TVDB_ORDER_OVERRIDES='78874:dvd, 81797:absolute ,bogus,:x,9:')
-        self.assertEqual(cfg.config.order_overrides,
-                         {'78874': 'dvd', '81797': 'absolute'})
-        reload_config(TVDB_ORDER_OVERRIDES=None)
-
-    def test_order_map_empty_by_default(self):
-        self.assertEqual(reload_config().config.order_overrides, {})
 
 
 class CoercionTest(unittest.TestCase):
@@ -278,8 +269,8 @@ class CacheTest(unittest.TestCase):
         self.assertEqual(tvdb._episode_rows(None), [])
 
 
-class SelectableOrderTest(unittest.TestCase):
-    """The /test provider: SeasonType on the show, episodeOrder honoured.
+class EpisodeOrderTest(unittest.TestCase):
+    """SeasonType on the show, episodeOrder honoured.
 
     Two episodes whose positions swap between aired and DVD order, the
     Firefly shape, so a wrong order is visible in the numbering.
@@ -341,7 +332,7 @@ class SelectableOrderTest(unittest.TestCase):
             setattr(tvdb, fn, original)
 
     def get(self, path):
-        response = self.client.get('/test' + path)
+        response = self.client.get('/tvdb' + path)
         self.assertEqual(response.status_code, 200, path)
         return response.get_json()['MediaContainer']['Metadata']
 
@@ -397,7 +388,7 @@ class SelectableOrderTest(unittest.TestCase):
         self.assertEqual(show['Children']['size'], 0)
 
     def test_season_match_honours_order_in_hints(self):
-        response = self.client.post('/test/library/metadata/matches', json={
+        response = self.client.post('/tvdb/library/metadata/matches', json={
             'type': 3, 'parentGuid': 'tvdb-78874', 'index': 1,
             'includeChildren': 1, 'episodeOrder': 'tvdbDvd'})
         season = response.get_json()['MediaContainer']['Metadata'][0]
@@ -405,16 +396,18 @@ class SelectableOrderTest(unittest.TestCase):
         self.assertEqual(season['Children']['Metadata'][0]['title'],
                          'Serenity')
 
-    def test_fixed_order_providers_keep_their_keys(self):
-        # The one-agent-per-order providers are untouched: no SeasonType,
-        # no order in their keys.
-        response = self.client.get('/dvd/library/metadata/show-78874/children')
-        seasons = response.get_json()['MediaContainer']['Metadata']
-        self.assertEqual(seasons[0]['ratingKey'], 'season-78874-1')
-        show = self.client.get('/dvd/library/metadata/show-78874') \
-            .get_json()['MediaContainer']['Metadata'][0]
-        self.assertNotIn('SeasonType', show)
+    def test_per_order_providers_are_gone(self):
+        # v1.0.0 registered /aired, /dvd, /absolute and /alternate. 1.0.1
+        # is one provider at /tvdb, and the old paths must not answer.
+        for path in ('/aired', '/dvd', '/absolute', '/alternate', '/test'):
+            self.assertEqual(self.client.get(path).status_code, 404, path)
 
+    def test_key_without_order_serves_aired(self):
+        # v1.0.0's season key carried no order. It still parses, and gets
+        # aired order rather than a 404.
+        eps = self.get('/library/metadata/season-78874-1/children')
+        self.assertEqual([e['title'] for e in eps],
+                         ['The Train Job', 'Serenity'])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

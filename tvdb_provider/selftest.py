@@ -68,7 +68,7 @@ def run(query, identifier=None, order='default'):
         return report
 
     # 5. episodes in the requested order - the point of the provider
-    wanted = series.resolve_order(series_id, order)
+    wanted = order or series.DEFAULT_ORDER
     episodes = series.ordered_episodes(series_id, wanted)
     if episodes is None:
         report['status'] = 'error'

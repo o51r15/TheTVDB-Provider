@@ -8,17 +8,17 @@ get wrong, I'd rather know than not.
 
 ## Before opening an issue
 
-Run the self-test for the order that's misbehaving:
+Run the self-test with the show that's misbehaving:
 
 ```bash
-curl -s http://your-server:8081/dvd/selftest | python3 -m json.tool
+curl -s "http://your-server:8081/tvdb/selftest?q=Firefly" | python3 -m json.tool
 curl -s http://your-server:8081/health | python3 -m json.tool
 ```
 
 Neither contains credentials — `/health` reports only whether `TVDB_API_KEY`
 and `TVDB_PIN` are *set* — so both are safe to paste.
 
-Include those, your Plex version, and the library's agent. For a matching
+Include those, your Plex version, and the episode order the show is set to. For a matching
 problem, set `TVDB_LOG_LEVEL=DEBUG` and include the line showing the hint Plex
 actually sent; it is usually not the folder name you'd expect.
 

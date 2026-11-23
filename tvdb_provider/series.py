@@ -1,30 +1,18 @@
-"""The TV-shaped provider: one blueprint per episode ordering.
+"""The TV provider.
 
-Plex's episode-ordering dropdown belongs to its own agents; the provider
-contract exposes only `metadata` and `match`, so there is no way to add an
-entry to it. What a provider *can* do is register more than one
-identifier, so each TheTVDB season type is offered as its own agent:
+Every show response carries a `SeasonType` array listing the TheTVDB
+orders that show has. Plex puts those in the show's Edit -> Advanced ->
+Episode ordering menu, and sends the one chosen back as `episodeOrder`
+on the show request. Nothing chosen means aired order.
 
-    TheTVDB (Aired Order)      tv.plex.agents.custom.tvdb.aired
-    TheTVDB (DVD Order)        tv.plex.agents.custom.tvdb.dvd
-    TheTVDB (Absolute Order)   tv.plex.agents.custom.tvdb.absolute
+After that first request Plex fetches seasons and episodes by key alone,
+with no order attached, so the order is part of the key:
+    show-<seriesId>                        e.g. show-78874
+    season-<seriesId>-<order>-<seasonNo>   e.g. season-78874-dvd-1
+    ep-<episodeId>-<order>                 e.g. ep-297999-dvd
 
-Picking the agent is therefore picking the order - which is the choice
-Plex is removing on 2026-12-03. TVDB_ORDER_OVERRIDES layers per-series
-exceptions on top, so one library can mix orders.
-
-Rating keys are prefixed so one metadata endpoint can dispatch on them:
-    show-<seriesId>                e.g. show-121361
-    season-<seriesId>-<seasonNo>   e.g. season-121361-3
-    ep-<episodeId>                 e.g. ep-9123456
-
-The selectable provider (/test) is the exception to one-order-per-agent.
-It advertises each show's orders in a `SeasonType` array, so they appear
-in Plex's own Edit -> Advanced -> Episode ordering menu, and serves
-whichever one Plex asks for. One provider then serves several orders, so
-its season and episode keys carry the order:
-    season-<seriesId>-<order>-<seasonNo>   e.g. season-121361-dvd-3
-    ep-<episodeId>-<order>                 e.g. ep-9123456-dvd
+Keys without an order (v1.0.0's format) still parse, and are served in
+aired order.
 """
 import logging
 import re
@@ -68,7 +56,7 @@ ORDERED_EPISODE_RE = re.compile(r'^ep-(\d+)-([a-z]+)$')
 def parse_key(rating_key):
     """-> (kind, series_id|episode_id, season_no|None, order|None)
 
-    order is set only for the selectable provider's ordered keys.
+    order is None for a key without one.
 
     An unparseable key yields (None, None, None) so the route can 404.
     Validating the season segment matters: 'season-121361' with no season
@@ -103,14 +91,8 @@ NO_KEY = (None, None, None, None)
 
 # ------------------------------------------------------------------- ordering
 
-def resolve_order(series_id, default_order):
-    """The season type to serve for one series.
-
-    A per-series override wins over the provider's own order, so a single
-    library can hold aired-order shows and absolute-order anime.
-    """
-    return config.order_overrides.get(mapping.text_of(series_id),
-                                      default_order)
+# Served when Plex names no order. TheTVDB calls aired order 'official'.
+DEFAULT_ORDER = 'official'
 
 
 # Plex's own ids for TheTVDB orders are tvdbAiring / tvdbDvd / tvdbAbsolute
@@ -240,7 +222,7 @@ def episode_numbers(ep, order):
 # -------------------------------------------------------------------- mapping
 
 def series_to_show(series, identifier, extended=None, translations=None,
-                   order=None, selectable=False):
+                   order=None):
     series_id = series.get('id')
     rating_key = show_key(series_id)
     record = extended if isinstance(extended, dict) else series
@@ -317,10 +299,9 @@ def series_to_show(series, identifier, extended=None, translations=None,
     # Useful for debugging a mismatched library: the order actually served.
     if order:
         item['slug'] = mapping.text_of(record.get('slug'))
-    if selectable:
-        types = season_type_block(extended or series, series_id)
-        if types:
-            item['SeasonType'] = types
+    types = season_type_block(extended or series, series_id)
+    if types:
+        item['SeasonType'] = types
     return item
 
 
@@ -534,28 +515,18 @@ def seasons_from(episodes, order):
 
 # --------------------------------------------------------------- the provider
 
-def make_tv_provider(name, identifier, title, order, selectable=False):
-    """One TV provider bound to one TheTVDB season type.
-
-    Registered once per order, so the agent dropdown in Plex becomes the
-    ordering picker.
-
-    With selectable=True, `order` is only the default: each show lists its
-    orders in SeasonType, Plex's per-show Episode ordering setting picks
-    one, and Plex sends it back as episodeOrder.
-    """
+def make_tv_provider(name, identifier, title):
+    """The provider. Each show offers its own orders through SeasonType."""
     bp = Blueprint(name, __name__)
+    order = DEFAULT_ORDER
 
-    if selectable:
-        @bp.before_request
-        def log_request():
-            # Which parameter name Plex really sends is still unconfirmed,
-            # so every request is logged with its query string while this
-            # provider is under test.
-            log.info('[%s] %s %s args=%s body=%s', name, request.method,
-                     request.path, request.args.to_dict(),
-                     request.get_json(silent=True) if request.method == 'POST'
-                     else None)
+    @bp.before_request
+    def log_request():
+        # At DEBUG: what Plex sent, including the order it asked for.
+        log.debug('[%s] %s %s args=%s body=%s', name, request.method,
+                  request.path, request.args.to_dict(),
+                  request.get_json(silent=True) if request.method == 'POST'
+                  else None)
 
     def choose(series_id, source=None, key_order=None):
         """-> (season type to serve, fallback allowed, order for keys).
@@ -564,9 +535,7 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
         not have; Plex's docs say to return no seasons then, rather than
         quietly serving a different order.
         """
-        default = resolve_order(series_id, order)
-        if not selectable:
-            return default, True, None
+        default = DEFAULT_ORDER
         if key_order:
             return key_order, key_order == default, key_order
         asked = requested_order(source) or requested_order(request.args)
@@ -677,7 +646,7 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
             if not base:
                 return box([])
             item = series_to_show(base, identifier, extended, translations,
-                                  order, selectable)
+                                  order)
             item['score'] = 100
             return box([item])
 
@@ -786,8 +755,7 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
         ep = tvdb.episode(episode_id)
         if not ep:
             return box([])
-        item = episode_to_item(ep, identifier, order,
-                               key_order=order if selectable else None)
+        item = episode_to_item(ep, identifier, order, key_order=order)
         item['score'] = 100
         return box([item])
 
@@ -832,7 +800,7 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
             if not base:
                 return not_found()
             item = series_to_show(base, identifier, extended, translations,
-                                  order, selectable)
+                                  order)
             if wants_children():
                 wanted, fallback, korder = choose(ident)
                 if wanted is None:
@@ -883,8 +851,8 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
             series_id = ep.get('seriesId')
             base = tvdb.series(series_id) if series_id else None
             if not series_id:
-                wanted, korder = order, (korder if selectable else None)
-            elif selectable:
+                wanted, korder = order, korder or order
+            else:
                 wanted, fallback, korder = choose(series_id, key_order=korder)
                 if wanted is None:
                     return not_found()
@@ -901,8 +869,6 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
                             if field in row:
                                 ep[field] = row[field]
                         break
-            else:
-                wanted = resolve_order(series_id, order)
             return box([episode_to_item(ep, identifier, wanted, base,
                                         translations, korder)])
 
