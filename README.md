@@ -192,7 +192,7 @@ python3 tests/test_provider.py
 
 ## Tech stack
 
-Python 3.9+ (`python:3.12-slim` in the image), Flask, gunicorn, `requests`, an in-process cache, and GitHub Actions publishing to GHCR.
+Python 3.9+ (`python:3.15-slim` in the image), Flask, gunicorn, `requests`, an in-process cache, and GitHub Actions publishing to GHCR.
 
 ## Links
 
