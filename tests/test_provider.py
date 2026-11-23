@@ -291,6 +291,11 @@ class SelectableOrderTest(unittest.TestCase):
              'type': {'id': 1, 'type': 'official', 'name': 'Aired Order'}},
             {'id': 2, 'number': 1,
              'type': {'id': 2, 'type': 'dvd', 'name': 'DVD Order'}},
+            # Season rows with no episodes behind them, as AEW Dynamite has
+            # for DVD order on TheTVDB.
+            {'id': 3, 'number': 1,
+             'type': {'id': 3, 'type': 'absolute',
+                      'name': 'Absolute Order'}},
         ],
     }
     EPISODES = {
@@ -346,6 +351,13 @@ class SelectableOrderTest(unittest.TestCase):
             [(t['id'], t['tag'], t['title']) for t in show['SeasonType']],
             [('tvdbAiring', 'Aired', 'TheTVDB (Aired Order)'),
              ('tvdbDvd', 'DVD', 'TheTVDB (DVD Order)')])
+
+    def test_order_with_seasons_but_no_episodes_is_not_offered(self):
+        # Offering it let Plex pick it, and the show came back with no
+        # seasons at all.
+        show = self.get('/library/metadata/show-78874')[0]
+        self.assertNotIn('tvdbAbsolute',
+                         [t['id'] for t in show['SeasonType']])
 
     def test_no_order_defaults_to_aired(self):
         eps = self.get('/library/metadata/season-78874-official-1/children')

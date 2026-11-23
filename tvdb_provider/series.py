@@ -172,10 +172,26 @@ def offered_orders(extended):
     return [(slug, label) for slug, (_, label) in ordered]
 
 
-def season_type_block(extended):
+def playable_orders(series_id, extended):
+    """offered_orders, minus any order with no episodes in it.
+
+    TheTVDB can carry season rows for an order with nothing in them - AEW
+    Dynamite has DVD seasons and no DVD episodes. Listed anyway, Plex
+    offers the order, and picking it hands Plex a show with no seasons.
+    Aired is kept regardless: it is the default and has the fallback.
+    Episode lists are cached for a day, so the check is cheap after the
+    first request.
+    """
+    return [(slug, label) for slug, label in offered_orders(extended)
+            if slug == 'official' or tvdb.series_episodes(series_id, slug)]
+
+
+def season_type_block(extended, series_id=None):
     """The SeasonType array Plex reads to fill its episode-ordering menu."""
     out = []
-    for slug, label in offered_orders(extended):
+    orders = (playable_orders(series_id, extended) if series_id
+              else offered_orders(extended))
+    for slug, label in orders:
         tag = label[:-len(' Order')] if label.endswith(' Order') else label
         out.append({'id': to_plex_order(slug), 'source': 'tvdb',
                     'tag': tag, 'title': '%s (%s)' % (config.title, label)})
@@ -302,7 +318,7 @@ def series_to_show(series, identifier, extended=None, translations=None,
     if order:
         item['slug'] = mapping.text_of(record.get('slug'))
     if selectable:
-        types = season_type_block(extended or series)
+        types = season_type_block(extended or series, series_id)
         if types:
             item['SeasonType'] = types
     return item
@@ -560,7 +576,8 @@ def make_tv_provider(name, identifier, title, order, selectable=False):
         if slug == default:
             return default, True, default
         offered = [o for o, _ in
-                   offered_orders(tvdb.series_extended(series_id))]
+                   playable_orders(series_id,
+                                   tvdb.series_extended(series_id))]
         if slug not in offered:
             log.info('[%s] series %s: order %r (%s) not offered; serving '
                      'no seasons', name, series_id, asked, slug)
