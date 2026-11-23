@@ -37,7 +37,7 @@ jobs:
       # on release tags. metadata-action strips the leading v, so a v1.0.0 tag
       # publishes :1.0.0 and :v1.0.0 does not exist.
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository_owner }}/tvdb-provider
           tags: |
