@@ -128,6 +128,7 @@ A few things worth knowing:
 - **Your files still need to be numbered for the order you pick.** Plex matches files by the `S01E03` in the filename, and a provider can't change that. If your files are numbered in aired order and you switch the show to DVD, the DVD titles land on the aired-order files.
 - **A refresh doesn't re-match.** Items that failed to match stay unmatched until a new scan or a manual **Fix Match**. Fix Match one show to check things before doing a whole library.
 - **Artwork changes need a Refresh Metadata.** Plex keeps the posters it already has.
+- **So do changes to the Episode ordering menu.** Plex stores each show's list of orders, so turning `TVDB_FULL_ORDERS_ONLY` on or off, or TheTVDB adding an order, only shows up after a Refresh Metadata on that show.
 - **If the new agent isn't in the dropdown,** hard-refresh Plex Web (`Ctrl+Shift+R`). The list is cached in the browser.
 
 ## Configuration
