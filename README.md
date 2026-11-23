@@ -229,6 +229,14 @@ GitHub Actions → GHCR
 - [TheTVDB v4 API](https://github.com/thetvdb/v4-api) — the metadata source
 - [Issues](https://github.com/o51r15/TheTVDB-Provider/issues) — bugs and feature requests
 
+## Contributing
+
+Bug reports and corrections to the API notes are the most useful thing you can
+send. [CONTRIBUTING.md](CONTRIBUTING.md) covers what to include in an issue,
+how to run the tests, and the constraints worth knowing before changing
+behaviour. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to the project's
+spaces.
+
 ## License
 
 [MIT](LICENSE). This is an independent project and is not affiliated with
