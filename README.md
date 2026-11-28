@@ -203,6 +203,10 @@ Python 3.9+ (`python:3.15-slim` in the image), Flask, gunicorn, `requests`, an i
 - [TheTVDB v4 API](https://github.com/thetvdb/v4-api)
 - [Issues](https://github.com/o51r15/TheTVDB-Provider/issues)
 
+## Related projects
+
+- [TVmaze-Provider](https://github.com/o51r15/TVmaze-Provider) is the same kind of provider for TVmaze. It needs no API key, and its DVD release and other alternate episode orders show up in the same Episode ordering menu.
+
 ## Contributing
 
 Bug reports are the most useful thing you can send, and so are corrections to the API notes. [CONTRIBUTING.md](CONTRIBUTING.md) covers what to put in an issue and how to run the tests. [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies here.
